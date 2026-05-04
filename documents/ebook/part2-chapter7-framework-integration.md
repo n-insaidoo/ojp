@@ -68,15 +68,28 @@ Setting the datasource type to `SimpleDriverDataSource` is crucial. This tells S
 
 **[IMAGE PROMPT: Create a side-by-side code comparison showing application.properties transformation. Left side labeled "Before OJP (manual)": Shows three explicit settings for url, driver-class-name, and type. Right side labeled "With OJP Starter": Shows only the url property, with annotations showing the two settings automatically injected by the starter. Style: Clean code comparison with syntax highlighting and arrows pointing to the automatic values.]**
 
-You can also tune the OJP server-side connection pool directly from `application.properties`:
+You can also tune the OJP server-side connection pool directly from `application.yml`:
+
+```yaml
+ojp:
+  connection:
+    pool:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 10000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  grpc:
+    max-inbound-message-size: 16777216   # bytes; increase for large LOB columns
+```
+
+Or in `application.properties`:
 
 ```properties
-# OJP server-side connection pool settings (forwarded to the OJP server).
-# Always use ojp.connection.pool.* in application.properties; the starter
-# auto-prefixes these with the datasource name when ojp.datasource.name is set.
+# OJP server-side connection pool settings (forwarded to the OJP server via gRPC)
 ojp.connection.pool.maximum-pool-size=20
 ojp.connection.pool.minimum-idle=5
-ojp.connection.pool.connection-timeout=30000
+ojp.connection.pool.connection-timeout=10000
 ojp.connection.pool.idle-timeout=600000
 ojp.connection.pool.max-lifetime=1800000
 
@@ -84,11 +97,66 @@ ojp.connection.pool.max-lifetime=1800000
 ojp.grpc.max-inbound-message-size=16777216
 ```
 
+### Per-Datasource vs. Global Settings
+
+Not all OJP settings accept a datasource name prefix. Pool settings are scoped per datasource; operational settings (health checks, redistribution, load-aware routing, retry) are cluster-wide.
+
+| Setting group | Supports `dsName.` prefix? |
+|---|---|
+| `ojp.connection.pool.*` | ✅ Yes |
+| `ojp.xa.connection.pool.*` | ✅ Yes |
+| `ojp.grpc.*` | ✅ Yes |
+| `ojp.health.check.*` | ❌ Global only |
+| `ojp.redistribution.*` | ❌ Global only |
+| `ojp.loadaware.selection.enabled` | ❌ Global only |
+| `ojp.multinode.*` | ❌ Global only |
+
+The datasource name is always specified inside the JDBC URL using parentheses. The matching pool settings are then prefixed with that name in `application.yml`:
+
+```yaml
+spring:
+  datasource:
+    # ── Named datasource "webapp" ──────────────────────────────────────────
+    url: jdbc:ojp[localhost:1059(webapp)]_postgresql://localhost:5432/mydb
+    username: myuser
+    password: mypassword
+
+# ✅ Per-datasource pool settings — prefixed with the datasource name
+webapp:
+  ojp:
+    connection:
+      pool:
+        maximum-pool-size: 60
+        minimum-idle: 15
+        connection-timeout: 5000
+    xa:
+      connection:
+        pool:
+          max-total: 50
+          min-idle: 10
+
+# ❌ Global settings — no prefix; apply to the entire cluster
+ojp:
+  multinode:
+    retry-attempts: -1
+    retry-delay-ms: 5000
+  health:
+    check:
+      interval: 5s
+      threshold: 5s
+      timeout: 5s
+  redistribution:
+    enabled: true
+    idle-rebalance-fraction: 1.0
+    max-close-per-recovery: 100
+  loadaware:
+    selection:
+      enabled: true
+```
+
 > **Tip — Named datasource:** To target a named pool configuration on the OJP server, embed the
 > datasource name in the JDBC URL:
 > `spring.datasource.url=jdbc:ojp[localhost:1059(myApp)]_postgresql://...`
-
-The starter's `OjpSystemPropertiesBridge` bean propagates these `ojp.*` properties to JVM system properties before any DataSource bean is created, so the OJP driver's `DatasourcePropertiesLoader` picks them up with the highest precedence—overriding any `ojp.properties` file on the classpath.
 
 ### Manual Configuration (Spring Boot 3.x / Java 11)
 

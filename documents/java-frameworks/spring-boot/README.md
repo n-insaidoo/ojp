@@ -151,9 +151,135 @@ ojp.multinode.retryAttempts=-1
 > across your project. Kebab-case is the Spring Boot convention and is generally preferred in
 > `application.yml`, while camelCase matches the underlying OJP property names more closely.
 
+#### Per-datasource settings vs. global settings
+
+Not all OJP properties support a datasource name prefix. Understanding the boundary is
+important when you use multiple named datasources.
+
+| Setting group | Supports `dsName.` prefix? | Examples |
+|---|---|---|
+| `ojp.connection.pool.*` | ✅ Yes | `webapp.ojp.connection.pool.maximum-pool-size` |
+| `ojp.xa.connection.pool.*` | ✅ Yes | `webapp.ojp.xa.connection.pool.max-total` |
+| `ojp.grpc.*` | ✅ Yes | `webapp.ojp.grpc.max-inbound-message-size` |
+| `ojp.health.check.*` | ❌ No — global only | `ojp.health.check.interval` |
+| `ojp.redistribution.*` | ❌ No — global only | `ojp.redistribution.enabled` |
+| `ojp.loadaware.selection.enabled` | ❌ No — global only | — |
+| `ojp.multinode.*` | ❌ No — global only | `ojp.multinode.retry-attempts` |
+
+The datasource name is always provided in the **JDBC URL** (not as a prefix in `application.yml`).
+Pool settings are then prefixed with that name in `application.yml` to target the correct pool:
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:ojp[localhost:1059(webapp)]_postgresql://localhost:5432/mydb
+    username: myuser
+    password: mypassword
+
+# ✅ Per-datasource pool settings — prefixed with the datasource name "webapp"
+webapp:
+  ojp:
+    connection:
+      pool:
+        maximum-pool-size: 60
+        minimum-idle: 15
+        connection-timeout: 5000
+
+# ❌ Global settings — never prefixed; they apply to the entire cluster
+ojp:
+  health:
+    check:
+      interval: 5s
+      threshold: 5s
+      timeout: 5s
+  redistribution:
+    enabled: true
+  loadaware:
+    selection:
+      enabled: true
+  multinode:
+    retry-attempts: -1
+    retry-delay-ms: 5000
+```
+
 > **Tip — Named datasource:** To use a named datasource pool configuration on the server, embed the
 > name directly in the JDBC URL using parentheses:
 > `spring.datasource.url=jdbc:ojp[localhost:1059(myApp)]_postgresql://...`
+
+---
+
+### Complete `application.yml` Reference
+
+A fully annotated reference file covering every OJP setting is available at:
+[`application-ojp-example.yml`](application-ojp-example.yml)
+
+Below is a condensed version showing all sections at a glance:
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:ojp[localhost:1059]_postgresql://localhost:5432/mydb
+    username: myuser
+    password: mypassword
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        hbm2ddl:
+          halt_on_error: true   # surface schema errors at startup, not at runtime
+
+# ── Connection pool (✅ per-datasource with prefix) ──────────────────────────
+ojp:
+  connection:
+    pool:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 10000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      default-transaction-isolation: READ_COMMITTED
+
+  # ── XA pool (✅ per-datasource with prefix) ───────────────────────────────
+  xa:
+    connection:
+      pool:
+        max-total: 20
+        min-idle: 5
+        connection-timeout: 20000
+
+  # ── gRPC transport (✅ per-datasource with prefix) ────────────────────────
+  grpc:
+    max-inbound-message-size: 16777216   # bytes; increase for large LOBs
+
+  # ── Multinode retry (❌ global) ───────────────────────────────────────────
+  multinode:
+    retry-attempts: -1        # -1 = infinite
+    retry-delay-ms: 5000
+
+  # ── Health check (❌ global) ───────────────────────────────────────────────
+  health:
+    check:
+      interval: 5s
+      threshold: 5s
+      timeout: 5s
+
+  # ── Connection redistribution (❌ global) ─────────────────────────────────
+  redistribution:
+    enabled: true
+    idle-rebalance-fraction: 1.0
+    max-close-per-recovery: 100
+
+  # ── Load-aware server selection (❌ global) ───────────────────────────────
+  loadaware:
+    selection:
+      enabled: true   # false = round-robin
+
+logging:
+  level:
+    org.openjproxy.grpc.client: INFO   # DEBUG for detailed health-check output
+```
 
 ### 5. Start the OJP Server
 
